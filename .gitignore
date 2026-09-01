@@ -1,0 +1,6 @@
+# Built app
+dist/
+*.app/
+
+# OS
+.DS_Store

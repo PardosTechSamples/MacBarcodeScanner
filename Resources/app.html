@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BarcodeScanner</title>
+    <style>
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0;
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f3f4f6;
+            color: #1f2937;
+        }
+        body {
+            display: flex;
+            flex-direction: column;
+            padding: 16px 20px 24px;
+            min-height: 100%;
+        }
+        h1 { margin: 0 0 4px; text-align: center; font-size: 26px; }
+        .subtitle { text-align: center; color: #6b7280; font-size: 13px; margin-bottom: 12px; }
+        .upload-area {
+            background: #fff;
+            border: 2px dashed #d1d5db;
+            border-radius: 12px;
+            padding: 28px 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+        }
+        .upload-area.compact { padding: 12px 16px; }
+        .upload-area:hover, .upload-area.dragover {
+            border-color: #2563eb;
+            background: #eff6ff;
+        }
+        .upload-icon { font-size: 36px; margin-bottom: 6px; }
+        .upload-area.compact .upload-icon { display: none; }
+        .supported-formats { color: #6b7280; font-size: 13px; margin-top: 6px; }
+        #status {
+            display: none;
+            text-align: center;
+            padding: 10px 14px;
+            margin: 12px 0 0;
+            border-radius: 8px;
+        }
+        #status.loading { display: block; background: #fff7ed; color: #9a3412; }
+        #status.success { display: block; background: #ecfdf5; color: #065f46; }
+        #status.error { display: block; background: #fef2f2; color: #991b1b; }
+        .progress-track {
+            display: none;
+            height: 6px;
+            background: #e5e7eb;
+            border-radius: 99px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+        .progress-track.visible { display: block; }
+        .progress-fill { height: 100%; width: 0; background: #2563eb; transition: width 0.2s; }
+        .spinner {
+            display: inline-block;
+            width: 14px; height: 14px;
+            border: 3px solid #fed7aa;
+            border-top-color: #ea580c;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+            vertical-align: -3px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .workspace {
+            display: none;
+            margin-top: 14px;
+            gap: 14px;
+            align-items: start;
+            flex: 1;
+        }
+        .results-panel { overflow: auto; max-height: calc(100vh - 200px); }
+        .pattern-summary {
+            font-size: 12px;
+            color: #4b5563;
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 8px 10px;
+            margin: 0 0 10px;
+            line-height: 1.45;
+        }
+        .misc-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+        .pattern-wrap { overflow: auto; margin-bottom: 8px; }
+        .pattern-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }
+        .pattern-table th {
+            background: #f1f5f9;
+            text-align: left;
+            padding: 6px 8px;
+            border: 1px solid #e2e8f0;
+            white-space: nowrap;
+        }
+        .pattern-table td {
+            border: 1px solid #e2e8f0;
+            padding: 6px 8px;
+            vertical-align: top;
+            cursor: pointer;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            word-break: break-all;
+        }
+        .pattern-table td:hover { background: #eff6ff; }
+        .cell-num { display: block; font-size: 10px; color: #64748b; font-family: -apple-system, sans-serif; margin-bottom: 2px; }
+        .workspace.visible {
+            display: grid;
+            grid-template-columns: 220px minmax(0, 1.3fr) minmax(340px, 1.1fr);
+        }
+        .queue-panel, .image-panel, .results-panel {
+            background: #fff;
+            border-radius: 12px;
+            padding: 12px;
+            box-shadow: 0 1px 8px rgba(0,0,0,0.06);
+            min-height: 0;
+        }
+        .queue-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .queue-head h3 { margin: 0; font-size: 14px; }
+        .queue-meta { color: #6b7280; font-weight: 500; font-size: 12px; }
+        .queue-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+        .queue-list {
+            overflow: auto;
+            max-height: calc(100vh - 280px);
+        }
+        .queue-item {
+            padding: 8px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 4px;
+            border: 1px solid transparent;
+        }
+        .queue-item:hover { background: #f8fafc; }
+        .queue-item.selected { background: #eff6ff; border-color: #bfdbfe; }
+        .queue-item.error { background: #fef2f2; }
+        .queue-name {
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .queue-sub { font-size: 11px; color: #6b7280; margin-top: 2px; }
+        .canvas-wrapper { position: relative; overflow: auto; max-height: calc(100vh - 250px); }
+        #imageCanvas { display: block; max-width: 100%; height: auto; cursor: pointer; }
+        .results-panel h3 { margin: 0 0 10px; }
+        .results-toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+        button.btn {
+            background: #2563eb;
+            color: #fff;
+            border: 0;
+            border-radius: 8px;
+            padding: 7px 11px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        button.btn:hover { background: #1d4ed8; }
+        button.btn.secondary { background: #e5e7eb; color: #111827; }
+        button.btn.secondary:hover { background: #d1d5db; }
+        .barcode-item {
+            background: #f8fafc;
+            padding: 10px 12px;
+            margin: 8px 0;
+            border-radius: 8px;
+            border-left: 4px solid #2563eb;
+            cursor: pointer;
+        }
+        .barcode-item:hover { background: #eff6ff; }
+        .barcode-format { font-weight: 650; font-size: 13px; }
+        .barcode-value {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            padding: 4px 8px;
+            border-radius: 6px;
+            margin-top: 6px;
+            word-break: break-all;
+            font-size: 13px;
+        }
+        .hint { color: #6b7280; font-size: 12px; margin-top: 8px; }
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #059669;
+            color: white;
+            padding: 14px 18px;
+            border-radius: 8px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.16);
+            display: none;
+            z-index: 20;
+            max-width: 420px;
+        }
+        .toast.show { display: block; }
+        .toast.error { background: #dc2626; }
+        @media (max-width: 1100px) {
+            .workspace.visible { grid-template-columns: 200px 1fr; }
+            .results-panel { grid-column: 1 / -1; }
+        }
+    </style>
+</head>
+<body>
+    <h1>BarcodeScanner</h1>
+    <div class="subtitle">Native WebKit app · Apple Vision · JPEG, PNG, HEIC · batch 20–200</div>
+
+    <div class="upload-area" id="uploadArea">
+        <div class="upload-icon">📷</div>
+        <p><strong>Click to open images or a folder</strong> · drag and drop</p>
+        <p class="supported-formats">JPEG, PNG, HEIC · ⌘O · add more anytime while scanning</p>
+        <input type="file" id="fileInput" accept="image/jpeg,image/png,image/heic,.heic,.HEIC,.jpg,.jpeg,.png" multiple hidden>
+    </div>
+    <div class="progress-track" id="progressTrack"><div class="progress-fill" id="progressFill"></div></div>
+    <div id="status"></div>
+
+    <div class="workspace" id="workspace">
+        <aside class="queue-panel">
+            <div class="queue-head">
+                <h3>Images <span class="queue-meta" id="queueMeta"></span></h3>
+            </div>
+            <div class="queue-actions" style="margin-bottom:8px">
+                <button class="btn" id="addBtn" type="button">Add</button>
+                <button class="btn secondary" id="copyBatchBtn" type="button">Copy CSV</button>
+                <button class="btn secondary" id="clearBtn" type="button">Clear</button>
+            </div>
+            <div class="queue-list" id="queueList"></div>
+        </aside>
+        <div class="image-panel">
+            <div class="canvas-wrapper">
+                <canvas id="imageCanvas"></canvas>
+            </div>
+            <p class="hint">Click a numbered line to copy. Lines follow barcode orientation.</p>
+        </div>
+        <div class="results-panel">
+            <h3 id="resultsTitle">Detected Barcodes</h3>
+            <div class="results-toolbar">
+                <button class="btn" id="copyAllBtn" type="button">Copy this image</button>
+                <button class="btn secondary" id="copyTableBtn" type="button">Copy table</button>
+            </div>
+            <div id="barcodeList"></div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        const colors = ['#2563eb','#dc2626','#059669','#d97706','#7c3aed','#0f766e','#db2777','#4f46e5'];
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const status = document.getElementById('status');
+        const workspace = document.getElementById('workspace');
+        const canvas = document.getElementById('imageCanvas');
+        const ctx = canvas.getContext('2d');
+        const barcodeList = document.getElementById('barcodeList');
+        const toast = document.getElementById('toast');
+        const queueList = document.getElementById('queueList');
+        const queueMeta = document.getElementById('queueMeta');
+        const progressTrack = document.getElementById('progressTrack');
+        const progressFill = document.getElementById('progressFill');
+        const resultsTitle = document.getElementById('resultsTitle');
+
+        let currentBarcodes = [];
+        let currentTableTSV = '';
+        let jobs = [];
+        let selectedId = null;
+        const jobData = {};
+        const nativeBridge = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.scanner);
+
+        function showStatus(message, kind) {
+            if (!message) return;
+            status.className = kind || 'loading';
+            status.innerHTML = (kind === 'loading' || !kind)
+                ? '<span class="spinner"></span>' + escapeHtml(message)
+                : escapeHtml(message);
+        }
+
+        function showToast(message, isError) {
+            toast.textContent = message;
+            toast.className = 'toast show' + (isError ? ' error' : '');
+            setTimeout(() => { toast.className = 'toast'; }, 2800);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text == null ? '' : String(text);
+            return div.innerHTML;
+        }
+
+        function postNative(payload) {
+            if (!nativeBridge) return false;
+            window.webkit.messageHandlers.scanner.postMessage(payload);
+            return true;
+        }
+
+        function copyText(text, successMessage) {
+            const note = successMessage || ('Copied: ' + text);
+            if (postNative({ action: 'copy', text })) {
+                showToast(note);
+                return;
+            }
+            navigator.clipboard.writeText(text).then(
+                () => showToast(note),
+                () => showToast('Could not copy', true)
+            );
+        }
+
+        function arrayBufferToBase64(buffer) {
+            const bytes = new Uint8Array(buffer);
+            let binary = '';
+            const chunk = 0x8000;
+            for (let i = 0; i < bytes.length; i += chunk) {
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+            }
+            return btoa(binary);
+        }
+
+        async function sendFilesToNative(fileList) {
+            const files = Array.from(fileList || []);
+            if (!files.length) return;
+            if (nativeBridge) {
+                postNative({ action: 'open' });
+                return;
+            }
+            for (const file of files) {
+                const buffer = await file.arrayBuffer();
+                postNative({
+                    action: 'scanData',
+                    filename: file.name,
+                    data: arrayBufferToBase64(buffer)
+                });
+            }
+        }
+
+        uploadArea.addEventListener('click', () => {
+            if (!postNative({ action: 'open' })) fileInput.click();
+        });
+        document.getElementById('addBtn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!postNative({ action: 'open' })) fileInput.click();
+        });
+        document.getElementById('clearBtn').addEventListener('click', () => postNative({ action: 'clear' }));
+        document.getElementById('copyBatchBtn').addEventListener('click', () => {
+            const csv = buildCSV(jobs.map(job => jobData[job.id]).filter(Boolean));
+            if (!csv) {
+                showToast('Nothing to copy yet', true);
+                return;
+            }
+            const rows = csv.split('\n').length - 1;
+            copyText(csv, 'Copied CSV (' + rows + (rows === 1 ? ' row)' : ' rows)'));
+        });
+        document.getElementById('copyAllBtn').addEventListener('click', () => {
+            if (!currentBarcodes.length) return;
+            copyText(currentBarcodes.map(b => b.rawValue).join('\n'));
+        });
+        document.getElementById('copyTableBtn').addEventListener('click', () => {
+            if (!currentTableTSV) return;
+            copyText(currentTableTSV, 'Copied table CSV');
+        });
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            if (nativeBridge) return;
+            if (e.dataTransfer.files.length) sendFilesToNative(e.dataTransfer.files);
+        });
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length) sendFilesToNative(e.target.files);
+        });
+
+        function renderQueue(snapshot) {
+            jobs = snapshot.jobs || [];
+            selectedId = snapshot.selectedId || selectedId;
+            const done = snapshot.scanned || 0;
+            const total = snapshot.total || jobs.length;
+            const codes = snapshot.barcodeCount || 0;
+            queueMeta.textContent = total ? `(${done}/${total})` : '';
+            const scanning = jobs.some(j => j.status === 'scanning' || j.status === 'pending');
+            progressTrack.classList.toggle('visible', total > 1 && scanning);
+            progressFill.style.width = total ? Math.round((done / total) * 100) + '%' : '0%';
+            uploadArea.classList.toggle('compact', total > 0);
+            workspace.classList.toggle('visible', total > 0);
+            queueList.innerHTML = jobs.map((job) => {
+                let sub = job.status;
+                if (job.status === 'done') sub = job.count ? `${job.count} barcode(s)` : 'No barcodes';
+                if (job.status === 'scanning') sub = 'Scanning…';
+                if (job.status === 'error') sub = job.error || 'Error';
+                const cls = ['queue-item'];
+                if (job.id === selectedId) cls.push('selected');
+                if (job.status === 'error') cls.push('error');
+                return `<div class="${cls.join(' ')}" data-id="${job.id}">
+                    <div class="queue-name">${escapeHtml(job.filename)}</div>
+                    <div class="queue-sub">${escapeHtml(sub)}</div>
+                </div>`;
+            }).join('');
+            queueList.querySelectorAll('.queue-item').forEach((el) => {
+                el.addEventListener('click', () => postNative({ action: 'select', id: el.dataset.id }));
+            });
+        }
+
+        function sortBarcodesReadingOrder(barcodes, imageHeight) {
+            if (barcodes.length === 0) return barcodes;
+            const getY = (barcode) => {
+                if (barcode.cornerPoints && barcode.cornerPoints.length) {
+                    return barcode.cornerPoints.reduce((sum, p) => sum + p.y, 0) / barcode.cornerPoints.length;
+                }
+                if (barcode.boundingBox) return barcode.boundingBox.y + barcode.boundingBox.height / 2;
+                return 0;
+            };
+            const getX = (barcode) => {
+                if (barcode.cornerPoints && barcode.cornerPoints.length) {
+                    return barcode.cornerPoints.reduce((sum, p) => sum + p.x, 0) / barcode.cornerPoints.length;
+                }
+                if (barcode.boundingBox) return barcode.boundingBox.x + barcode.boundingBox.width / 2;
+                return 0;
+            };
+            let avgHeight = 0, count = 0;
+            for (const barcode of barcodes) {
+                if (barcode.boundingBox) {
+                    avgHeight += barcode.boundingBox.height;
+                    count++;
+                }
+            }
+            const rowThreshold = count > 0 ? (avgHeight / count) * 0.7 : imageHeight * 0.05;
+            const sorted = [...barcodes].sort((a, b) => getY(a) - getY(b));
+            const rows = [];
+            let currentRow = [sorted[0]];
+            let currentRowY = getY(sorted[0]);
+            for (let i = 1; i < sorted.length; i++) {
+                const y = getY(sorted[i]);
+                if (Math.abs(y - currentRowY) <= rowThreshold) currentRow.push(sorted[i]);
+                else {
+                    rows.push(currentRow);
+                    currentRow = [sorted[i]];
+                    currentRowY = y;
+                }
+            }
+            rows.push(currentRow);
+            for (const row of rows) row.sort((a, b) => getX(a) - getX(b));
+            return rows.flat();
+        }
+
+        function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+        function scannerLine(barcode) {
+            const pts = barcode.cornerPoints;
+            if (pts && pts.length >= 4) {
+                const edges = [[0, 1], [1, 2], [2, 3], [3, 0]];
+                let bestLen = 0, best = edges[0];
+                for (const edge of edges) {
+                    const len = dist(pts[edge[0]], pts[edge[1]]);
+                    if (len > bestLen) { bestLen = len; best = edge; }
+                }
+                const a = pts[best[0]], b = pts[best[1]];
+                const dx = b.x - a.x, dy = b.y - a.y;
+                const length = Math.hypot(dx, dy) || 1;
+                const ux = dx / length, uy = dy / length;
+                const center = {
+                    x: pts.reduce((sum, p) => sum + p.x, 0) / pts.length,
+                    y: pts.reduce((sum, p) => sum + p.y, 0) / pts.length
+                };
+                const half = bestLen / 2 + bestLen * 0.1;
+                return {
+                    x1: center.x - ux * half, y1: center.y - uy * half,
+                    x2: center.x + ux * half, y2: center.y + uy * half,
+                    center, isVertical: Math.abs(uy) >= Math.abs(ux)
+                };
+            }
+            const box = barcode.boundingBox;
+            if (!box) return null;
+            const isVertical = box.height > box.width;
+            const pad = (isVertical ? box.height : box.width) * 0.1;
+            if (isVertical) {
+                const cx = box.x + box.width / 2;
+                return { x1: cx, y1: box.y - pad, x2: cx, y2: box.y + box.height + pad, center: { x: cx, y: box.y + box.height / 2 }, isVertical: true };
+            }
+            const cy = box.y + box.height / 2;
+            return { x1: box.x - pad, y1: cy, x2: box.x + box.width + pad, y2: cy, center: { x: box.x + box.width / 2, y: cy }, isVertical: false };
+        }
+
+        function pointToSegmentDistance(px, py, line) {
+            const dx = line.x2 - line.x1, dy = line.y2 - line.y1;
+            const len2 = dx * dx + dy * dy || 1;
+            let t = ((px - line.x1) * dx + (py - line.y1) * dy) / len2;
+            t = Math.max(0, Math.min(1, t));
+            return Math.hypot(px - (line.x1 + t * dx), py - (line.y1 + t * dy));
+        }
+
+        function drawScannerLines(barcodes) {
+            ctx.strokeStyle = '#dc3545';
+            ctx.lineWidth = Math.max(3, canvas.width / 400);
+            ctx.lineCap = 'round';
+            barcodes.forEach((barcode, index) => {
+                const line = scannerLine(barcode);
+                if (!line) return;
+                ctx.beginPath();
+                ctx.moveTo(line.x1, line.y1);
+                ctx.lineTo(line.x2, line.y2);
+                ctx.stroke();
+                const fontSize = Math.max(16, canvas.width / 70);
+                ctx.font = `bold ${fontSize}px -apple-system, Arial`;
+                ctx.fillStyle = colors[index % colors.length];
+                if (line.isVertical) {
+                    ctx.fillText(String(index + 1), line.center.x - fontSize - 6, Math.min(line.y1, line.y2) - 6);
+                } else {
+                    ctx.fillText(String(index + 1), Math.min(line.x1, line.x2) - fontSize - 8, line.center.y + fontSize / 3);
+                }
+            });
+        }
+
+        function setupCanvasClickHandler(barcodes) {
+            canvas.onclick = (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const clickX = (e.clientX - rect.left) * (canvas.width / rect.width);
+                const clickY = (e.clientY - rect.top) * (canvas.height / rect.height);
+                const lineTolerance = Math.max(30, Math.min(canvas.width, canvas.height) / 30);
+                let clicked = null, minDistance = Infinity;
+                for (const barcode of barcodes) {
+                    const line = scannerLine(barcode);
+                    if (!line) continue;
+                    const d = pointToSegmentDistance(clickX, clickY, line);
+                    if (d <= lineTolerance && d < minDistance) {
+                        minDistance = d;
+                        clicked = barcode;
+                    }
+                }
+                if (clicked) copyText(clicked.rawValue);
+            };
+        }
+
+        function looksLikeHexId(value) {
+            return /^[0-9A-Fa-f]+$/.test(value) && value.length >= 8;
+        }
+
+        function sharedTypePrefix(values) {
+            if (!values.length) return { prefix: '', score: 0 };
+            if (values.every(looksLikeHexId)) {
+                const unique = new Set(values).size;
+                const lens = values.map(v => v.length);
+                const spread = Math.max(...lens) - Math.min(...lens);
+                return { prefix: '', score: 2 + unique + (spread <= 2 ? 3 : 0) };
+            }
+            let best = { prefix: '', score: 1 };
+            const maxLen = Math.min(6, ...values.map(v => v.length));
+            for (let len = 0; len <= maxLen; len++) {
+                const prefix = values[0].slice(0, len);
+                if (!values.every(v => v.startsWith(prefix))) continue;
+                const rests = values.map(v => v.slice(len));
+                const unique = new Set(rests).size;
+                if (values.length >= 2 && unique < 2 && len > 0) continue;
+                const restLens = rests.map(r => r.length);
+                const spread = Math.max(...restLens) - Math.min(...restLens);
+                if (len > 0 && spread > Math.max(6, Math.min(...restLens))) continue;
+                let score = unique * 2 + (unique === values.length ? 3 : 0);
+                if (len === 0) {
+                    score += 1;
+                } else {
+                    score += 3;
+                    if (/^\d{0,2}[A-Za-z]{1,2}\+?$/.test(prefix)) score += 10;
+                    if (prefix.length <= 2) score += 3;
+                    if (prefix.length > 3) score -= (prefix.length - 3) * 2;
+                }
+                if (spread <= 2) score += 2;
+                if (score > best.score) best = { prefix, score };
+            }
+            return best;
+        }
+
+        function detectRepeatingStructure(barcodes) {
+            const n = barcodes.length;
+            if (n < 4) return null;
+            let best = null;
+            for (let period = 2; period <= 5; period++) {
+                for (let headerCount = 0; headerCount <= Math.min(8, n - 2 * period); headerCount++) {
+                    if ((n - headerCount) % period !== 0) continue;
+                    const groupCount = (n - headerCount) / period;
+                    if (groupCount < 2) continue;
+                    const groups = [];
+                    for (let i = headerCount; i < n; i += period) {
+                        groups.push(barcodes.slice(i, i + period));
+                    }
+                    const columns = [];
+                    let score = 0;
+                    let strong = 0;
+                    const aiLike = /^\d{0,2}[A-Za-z]{1,2}\+?$/;
+                    for (let col = 0; col < period; col++) {
+                        const values = groups.map(group => group[col].rawValue);
+                        const info = sharedTypePrefix(values);
+                        columns.push(info);
+                        score += info.score;
+                        if (aiLike.test(info.prefix) || values.every(looksLikeHexId)) strong += 1;
+                    }
+                    if (strong < 1) continue;
+                    if (score < groupCount * 4) continue;
+                    const rank = score * 20 + groupCount * 8 - period * 2 - headerCount;
+                    if (!best || rank > best.rank) {
+                        best = {
+                            rank,
+                            headerCount,
+                            period,
+                            groupCount,
+                            columns,
+                            header: barcodes.slice(0, headerCount),
+                            rows: groups,
+                            score
+                        };
+                    }
+                }
+            }
+            return best;
+        }
+
+        function structureSummary(pattern) {
+            const colLabels = pattern.columns.map(col => col.prefix || '·').join(', ');
+            const misc = pattern.headerCount
+                ? `${[...Array(pattern.headerCount)].map((_, i) => i + 1).join(',')} misc · `
+                : '';
+            const first = pattern.headerCount + 1;
+            const firstGroup = [...Array(pattern.period)].map((_, i) => first + i).join(',');
+            return `${misc}${firstGroup} repeats × ${pattern.groupCount} as (${colLabels})`;
+        }
+
+        function csvEscape(value) {
+            const text = String(value == null ? '' : value);
+            if (/[",\n\r]/.test(text)) return '"' + text.replace(/"/g, '""') + '"';
+            return text;
+        }
+
+        function patternColumnLabel(col, index) {
+            return col && col.prefix ? col.prefix : ('Pattern' + (index + 1));
+        }
+
+        function storeJobResult(message) {
+            const sorted = sortBarcodesReadingOrder(message.barcodes || [], message.height || 1);
+            jobData[message.id] = {
+                filename: message.filename,
+                barcodes: sorted,
+                pattern: detectRepeatingStructure(sorted)
+            };
+            return jobData[message.id];
+        }
+
+        function buildCSV(records) {
+            if (!records.length) return '';
+
+            let maxMisc = 0;
+            let patternLabels = [];
+            for (const rec of records) {
+                if (!rec.pattern) continue;
+                maxMisc = Math.max(maxMisc, rec.pattern.headerCount);
+                const labels = rec.pattern.columns.map((col, i) => patternColumnLabel(col, i));
+                if (labels.length > patternLabels.length) patternLabels = labels;
+            }
+
+            const headers = ['Filename'];
+            for (let i = 0; i < maxMisc; i++) headers.push('Misc' + (i + 1));
+            headers.push(...patternLabels);
+            if (headers.length === 1) headers.push('value');
+
+            const lines = [headers.map(csvEscape).join(',')];
+            for (const rec of records) {
+                if (rec.pattern) {
+                    const misc = rec.pattern.header.map(b => b.rawValue);
+                    while (misc.length < maxMisc) misc.push('');
+                    for (const row of rec.pattern.rows) {
+                        const patternVals = row.map(cell => cell.rawValue);
+                        while (patternVals.length < patternLabels.length) patternVals.push('');
+                        lines.push([rec.filename, ...misc, ...patternVals].map(csvEscape).join(','));
+                    }
+                } else if (!rec.barcodes.length) {
+                    const empties = Array(Math.max(1, maxMisc + patternLabels.length)).fill('');
+                    lines.push([rec.filename, ...empties].map(csvEscape).join(','));
+                } else {
+                    for (const barcode of rec.barcodes) {
+                        if (patternLabels.length === 0 && maxMisc === 0) {
+                            lines.push([rec.filename, barcode.rawValue].map(csvEscape).join(','));
+                        } else {
+                            const misc = Array(maxMisc).fill('');
+                            const rest = Array(patternLabels.length).fill('');
+                            if (rest.length) rest[0] = barcode.rawValue;
+                            else misc[0] = barcode.rawValue;
+                            lines.push([rec.filename, ...misc, ...rest].map(csvEscape).join(','));
+                        }
+                    }
+                }
+            }
+            return lines.join('\n');
+        }
+
+        function displayResults(rec) {
+            const barcodes = rec.barcodes || [];
+            const pattern = rec.pattern;
+            const filename = rec.filename;
+            resultsTitle.textContent = filename ? filename : 'Detected Barcodes';
+            currentTableTSV = buildCSV([rec]);
+            if (!barcodes.length) {
+                barcodeList.innerHTML = '<p class="hint">No barcodes were detected in this image.</p>';
+                return;
+            }
+
+            const parts = [];
+
+            if (pattern) {
+                parts.push(`<div class="pattern-summary">${escapeHtml(structureSummary(pattern))}</div>`);
+                if (pattern.header.length) {
+                    parts.push('<div class="misc-list">');
+                    pattern.header.forEach((barcode, i) => {
+                        parts.push(barcodeCard(barcode, i, 'misc'));
+                    });
+                    parts.push('</div>');
+                }
+                parts.push('<div class="pattern-wrap"><table class="pattern-table"><thead><tr>');
+                pattern.columns.forEach((col, colIndex) => {
+                    parts.push(`<th>${escapeHtml(patternColumnLabel(col, colIndex))}</th>`);
+                });
+                parts.push('</tr></thead><tbody>');
+                pattern.rows.forEach((row, rowIndex) => {
+                    parts.push('<tr>');
+                    row.forEach((cell, colIndex) => {
+                        const absIndex = pattern.headerCount + rowIndex * pattern.period + colIndex;
+                        parts.push(`<td data-index="${absIndex}"><span class="cell-num">#${absIndex + 1}</span>${escapeHtml(cell.rawValue)}</td>`);
+                    });
+                    parts.push('</tr>');
+                });
+                parts.push('</tbody></table></div>');
+            } else {
+                parts.push('<div class="pattern-summary">No repeating prefix pattern — one value per row</div>');
+                barcodes.forEach((barcode, i) => {
+                    parts.push(barcodeCard(barcode, i, ''));
+                });
+            }
+
+            barcodeList.innerHTML = parts.join('');
+            barcodeList.querySelectorAll('[data-index]').forEach((el) => {
+                el.addEventListener('click', () => copyText(barcodes[Number(el.dataset.index)].rawValue));
+            });
+        }
+
+        function barcodeCard(barcode, index, role) {
+            const roleLabel = role === 'misc' ? ' misc' : '';
+            return `<div class="barcode-item" data-index="${index}" style="border-left-color:${colors[index % colors.length]}">
+                <span class="barcode-format" style="color:${colors[index % colors.length]}">#${index + 1}${roleLabel} — ${escapeHtml(barcode.format)}</span>
+                <div class="barcode-value">${escapeHtml(barcode.rawValue)}</div>
+            </div>`;
+        }
+
+        function showResult(message) {
+            const rec = storeJobResult(message);
+            const img = new Image();
+            img.onload = () => {
+                canvas.width = message.width || img.width;
+                canvas.height = message.height || img.height;
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                currentBarcodes = rec.barcodes;
+                drawScannerLines(rec.barcodes);
+                setupCanvasClickHandler(rec.barcodes);
+                displayResults(rec);
+                workspace.classList.add('visible');
+            };
+            img.onerror = () => showStatus('Could not display the scanned image.', 'error');
+            img.src = message.imageURL;
+        }
+
+        window.scannerReceive = function scannerReceive(message) {
+            if (!message) return;
+            if (message.type === 'cleared') {
+                jobs = [];
+                selectedId = null;
+                currentBarcodes = [];
+                Object.keys(jobData).forEach(key => { delete jobData[key]; });
+                workspace.classList.remove('visible');
+                uploadArea.classList.remove('compact');
+                progressTrack.classList.remove('visible');
+                queueList.innerHTML = '';
+                status.className = '';
+                status.textContent = '';
+                return;
+            }
+            if (message.type === 'batch') {
+                renderQueue(message);
+                if (message.status) showStatus(message.status, message.kind || 'loading');
+                return;
+            }
+            if (message.type === 'status') {
+                showStatus(message.message, message.kind || 'loading');
+                return;
+            }
+            if (message.type === 'result') {
+                storeJobResult(message);
+                if (!selectedId || message.id === selectedId) {
+                    showResult(message);
+                }
+            }
+        };
+    </script>
+</body>
+</html>
